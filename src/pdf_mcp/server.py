@@ -284,14 +284,15 @@ def read_pdf_page(
     cache_dir = _get_cache_dir(path)
     
     # 페이지 전체를 이미지로 렌더링 (150 DPI)
-    zoom = 150 / 72
-    matrix = fitz.Matrix(zoom, zoom)
-    pixmap = page.get_pixmap(matrix=matrix)
-    
-    # 이미지 저장
     filename = f"page_{page_number:03d}.png"
     image_path = cache_dir / filename
-    pixmap.save(str(image_path))
+    
+    # 캐시가 없을 때만 렌더링
+    if not image_path.exists():
+        zoom = 150 / 72
+        matrix = fitz.Matrix(zoom, zoom)
+        pixmap = page.get_pixmap(matrix=matrix)
+        pixmap.save(str(image_path))
     
     # 이미지를 base64로 인코딩
     with open(image_path, "rb") as f:
@@ -350,11 +351,13 @@ def read_pdf_all(
     for page_num in range(start, end):
         page = doc[page_num]
         
-        # 페이지 렌더링
-        pixmap = page.get_pixmap(matrix=matrix)
+        # 페이지 렌더링 (캐시가 없을 때만)
         filename = f"page_{page_num + 1:03d}.png"
         image_path = cache_dir / filename
-        pixmap.save(str(image_path))
+        
+        if not image_path.exists():
+            pixmap = page.get_pixmap(matrix=matrix)
+            pixmap.save(str(image_path))
         
         # 이미지 base64 인코딩
         with open(image_path, "rb") as f:
@@ -419,12 +422,14 @@ def read_pdf_smart(
         has_drawings = len(page.get_drawings()) > 0
         
         if has_images or has_drawings:
-            # 이미지/드로잉이 있으면 페이지 전체를 이미지로 렌더링
+            # 이미지/드로잉이 있으면 페이지 전체를 이미지로 렌더링 (캐시가 없을 때만)
             image_page_count += 1
-            pixmap = page.get_pixmap(matrix=matrix)
             filename = f"page_{page_num + 1:03d}.png"
             image_path = cache_dir / filename
-            pixmap.save(str(image_path))
+            
+            if not image_path.exists():
+                pixmap = page.get_pixmap(matrix=matrix)
+                pixmap.save(str(image_path))
             
             with open(image_path, "rb") as f:
                 image_data = base64.standard_b64encode(f.read()).decode("utf-8")
