@@ -82,7 +82,7 @@ def _extract_page_elements(page: fitz.Page, cache_dir: Path, page_num: int) -> L
     # get_text("dict")는 페이지 내 모든 블록의 상세 정보를 반환
     text_dict = page.get_text("dict")
     
-    for block_num, block in enumerate(text_dict.get("blocks", [])):
+    for block in text_dict.get("blocks", []):
         bbox = block.get("bbox", (0, 0, 0, 0))  # (x0, y0, x1, y1)
         y_pos = bbox[1]  # y0 좌표 (위에서부터의 거리)
         
@@ -99,68 +99,39 @@ def _extract_page_elements(page: fitz.Page, cache_dir: Path, page_num: int) -> L
             if text_lines:
                 text_content = "\n".join(text_lines)
                 elements.append((y_pos, "text", text_content))
-        
-        elif block.get("type") == 1:  # 이미지 블록
-            # 이미지 블록에서 이미지 데이터 추출
-            try:
-                # 블록의 이미지 정보에서 xref 가져오기
-                img_list = page.get_images(full=True)
-                for img_idx, img_info in enumerate(img_list):
-                    xref = img_info[0]
-                    
-                    # 이미지 추출
-                    base_image = page.parent.extract_image(xref)
-                    if base_image:
-                        image_bytes = base_image["image"]
-                        image_ext = base_image["ext"]
-                        
-                        # 이미지 저장
-                        filename = f"img_p{page_num + 1}_{img_idx + 1:03d}.{image_ext}"
-                        image_path = cache_dir / filename
-                        
-                        # 이미 캐시된 이미지가 있으면 재사용
-                        if not image_path.exists():
-                            with open(image_path, "wb") as f:
-                                f.write(image_bytes)
-                        
-                        elements.append((y_pos, "image", str(image_path.absolute())))
-            except Exception:
-                pass  # 이미지 추출 실패 시 무시
     
-    # 2. 페이지 내 임베디드 이미지 직접 추출 (블록으로 안 잡히는 경우 대비)
-    existing_images = {e[2] for e in elements if e[1] == "image"}
-    
+    # 2. 이미지 추출 - 각 이미지의 실제 위치(bbox)를 사용
+    # get_images()로 이미지 목록을 가져오고, get_image_rects()로 위치 확인
     for img_idx, img_info in enumerate(page.get_images(full=True)):
         xref = img_info[0]
         
         try:
+            # 이미지의 실제 위치(bbox) 가져오기
+            img_rects = page.get_image_rects(xref)
+            if not img_rects:
+                continue  # 위치를 알 수 없으면 건너뜀
+            
+            # 첫 번째 rect의 y0 좌표 사용 (이미지가 여러 곳에 있을 수 있지만 첫 번째 사용)
+            y_pos = img_rects[0].y0
+            
+            # 이미지 데이터 추출
             base_image = page.parent.extract_image(xref)
             if base_image:
                 image_bytes = base_image["image"]
                 image_ext = base_image["ext"]
                 
+                # 이미지 저장
                 filename = f"img_p{page_num + 1}_{img_idx + 1:03d}.{image_ext}"
                 image_path = cache_dir / filename
                 
-                # 이미 추가된 이미지가 아니면 추가
-                if str(image_path.absolute()) not in existing_images:
-                    if not image_path.exists():
-                        with open(image_path, "wb") as f:
-                            f.write(image_bytes)
-                    
-                    # 이미지 위치 정보 가져오기 시도
-                    try:
-                        img_rects = page.get_image_rects(xref)
-                        if img_rects:
-                            y_pos = img_rects[0].y0
-                        else:
-                            y_pos = float('inf')  # 위치 모르면 맨 뒤로
-                    except:
-                        y_pos = float('inf')
-                    
-                    elements.append((y_pos, "image", str(image_path.absolute())))
+                # 이미 캐시된 이미지가 있으면 재사용
+                if not image_path.exists():
+                    with open(image_path, "wb") as f:
+                        f.write(image_bytes)
+                
+                elements.append((y_pos, "image", str(image_path.absolute())))
         except Exception:
-            pass
+            pass  # 이미지 추출 실패 시 무시
     
     # Y좌표 기준 정렬 (위에서 아래로)
     elements.sort(key=lambda x: x[0])
