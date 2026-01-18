@@ -6,6 +6,8 @@ PDF 파일을 멀티모달 LLM이 읽을 수 있게 해주는 MCP 서버입니�
 
 - **페이지 이미지 변환**: PDF 페이지를 이미지로 렌더링하여 LLM에 직접 전달
 - **전체 PDF 한 번에 읽기**: `read_pdf_all`로 모든 페이지를 한 번에 처리
+- **스마트 읽기**: `read_pdf_smart`로 텍스트/이미지 페이지 자동 판단
+- **벡터 그래픽 감지**: 드로잉(그래프, 도표) 개수도 함께 표시
 - **레이아웃 완벽 지원**: 2단 레이아웃, 벡터 그래프, 표 등 모두 정확히 표현
 - **이미지 캐싱**: 렌더링된 이미지를 캐시하여 재사용
 
@@ -31,11 +33,22 @@ pip install -e .
 
 ## 사용 가능한 도구
 
-### `read_pdf_all` ⭐ (권장)
-**전체 PDF를 한 번에 읽기** - 모든 페이지를 이미지로 변환하여 반환
+### `read_pdf_smart` ⭐ (권장 - 효율적)
+**페이지 내용을 분석하여 최적의 방식으로 읽기**
+- 텍스트만 있는 페이지 → 텍스트로 반환 (빠름, 토큰 절약)
+- 이미지/드로잉이 있는 페이지 → 이미지로 렌더링
+
+```
+read_pdf_smart(path="d:/path/to/file.pdf")
+read_pdf_smart(path="d:/path/to/file.pdf", start_page=1, end_page=5)
+```
+
+### `read_pdf_all`
+**전체 PDF를 이미지로 읽기** - 모든 페이지를 이미지로 변환
 
 ```
 read_pdf_all(path="d:/path/to/file.pdf")
+read_pdf_all(path="d:/path/to/file.pdf", start_page=1, end_page=10)  # 범위 지정
 ```
 
 ### `read_pdf_page`
@@ -46,10 +59,17 @@ read_pdf_page(path="d:/path/to/file.pdf", page_number=1)
 ```
 
 ### `read_pdf_info`
-PDF 메타데이터 읽기 (페이지 수, 제목, 저자 등)
+PDF 메타데이터 읽기 (페이지 수, 제목, 저자, 이미지/드로잉 개수 등)
 
 ```
 read_pdf_info(path="d:/path/to/file.pdf")
+```
+
+출력 예시:
+```
+📋 페이지 요약:
+  [1] 이미지: 0개, 드로잉: 5개 | 텍스트 미리보기...
+  [2] 이미지: 2개, 드로잉: 0개 | 텍스트 미리보기...
 ```
 
 ### `read_pdf_text`
@@ -81,12 +101,20 @@ render_pdf_page(path="d:/path/to/file.pdf", page_number=1, dpi=150)
 ### 권장 사용 패턴
 
 ```
-# 전체 PDF 읽기 (한 번에)
+# 효율적으로 전체 읽기 (텍스트/이미지 자동 판단)
+read_pdf_smart(path="d:/path/to/paper.pdf")
+
+# 특정 범위만 읽기
+read_pdf_smart(path="d:/path/to/paper.pdf", start_page=5, end_page=10)
+
+# 전부 이미지로 읽기 (레이아웃 중요할 때)
 read_pdf_all(path="d:/path/to/paper.pdf")
 
 # 특정 페이지만 읽기
 read_pdf_page(path="d:/path/to/paper.pdf", page_number=3)
 ```
 
-- 이미지로 변환되므로 레이아웃, 그래프, 표가 완벽하게 보입니다
-- `view_file` 호출 없이 바로 이미지가 표시됩니다
+- `read_pdf_smart`: 토큰 절약하면서 그래프/도표도 정확히 보기
+- `read_pdf_all`: 모든 페이지를 이미지로 보기 (레이아웃 완벽)
+- 이미지로 변환되므로 `view_file` 호출 없이 바로 표시됩니다
+

@@ -185,7 +185,8 @@ def read_pdf_info(path: str) -> str:
         page = doc[page_num]
         text_preview = page.get_text()[:50].replace('\n', ' ')
         img_count = len(page.get_images())
-        result.append(f"  [{page_num + 1}] 이미지: {img_count}개 | {text_preview}...")
+        drawing_count = len(page.get_drawings())
+        result.append(f"  [{page_num + 1}] 이미지: {img_count}개, 드로잉: {drawing_count}개 | {text_preview}...")
     
     if len(doc) > 10:
         result.append(f"  ... 외 {len(doc) - 10}페이지 더 있음")
@@ -296,7 +297,9 @@ def read_pdf_page(
 
 @mcp.tool()
 def read_pdf_all(
-    path: str
+    path: str,
+    start_page: Optional[int] = None,
+    end_page: Optional[int] = None
 ) -> List[Union[TextContent, ImageContent]]:
     """
     PDF 전체를 한 번에 읽어서 모든 페이지를 이미지로 반환합니다.
@@ -306,6 +309,8 @@ def read_pdf_all(
     
     Args:
         path: PDF 파일의 절대 경로
+        start_page: 시작 페이지 (1부터 시작, None이면 처음부터)
+        end_page: 끝 페이지 (포함, None이면 끝까지)
     
     Returns:
         모든 페이지의 텍스트 헤더와 이미지를 순서대로 포함한 리스트
@@ -313,14 +318,24 @@ def read_pdf_all(
     doc = _load_pdf(path)
     cache_dir = _get_cache_dir(path)
     
+    # 페이지 범위 설정
+    total_pages = len(doc)
+    start = (start_page - 1) if start_page else 0
+    end = end_page if end_page else total_pages
+    
+    # 범위 검증
+    start = max(0, min(start, total_pages - 1))
+    end = max(start + 1, min(end, total_pages))
+    
+    range_text = f"페이지 {start + 1}~{end}" if (start_page or end_page) else f"전체 {total_pages}페이지"
     result = [
-        TextContent(type="text", text=f"📄 PDF: {Path(path).name} ({len(doc)}페이지)\n{'='*60}\n")
+        TextContent(type="text", text=f"📄 PDF: {Path(path).name} ({range_text})\n{'='*60}\n")
     ]
     
     zoom = 150 / 72
     matrix = fitz.Matrix(zoom, zoom)
     
-    for page_num in range(len(doc)):
+    for page_num in range(start, end):
         page = doc[page_num]
         
         # 페이지 렌더링
@@ -336,6 +351,88 @@ def read_pdf_all(
         # 페이지 헤더와 이미지 추가
         result.append(TextContent(type="text", text=f"\n📖 페이지 {page_num + 1}\n"))
         result.append(ImageContent(type="image", data=image_data, mimeType="image/png"))
+    
+    doc.close()
+    return result
+
+
+@mcp.tool()
+def read_pdf_smart(
+    path: str,
+    start_page: Optional[int] = None,
+    end_page: Optional[int] = None
+) -> List[Union[TextContent, ImageContent]]:
+    """
+    페이지 내용을 분석하여 최적의 방식으로 PDF를 읽습니다.
+    
+    - 텍스트만 있는 페이지 → 텍스트로 반환 (빠름, 토큰 절약)
+    - 이미지/드로잉(그래프, 도표)이 있는 페이지 → 이미지로 렌더링
+    
+    Args:
+        path: PDF 파일의 절대 경로
+        start_page: 시작 페이지 (1부터 시작, None이면 처음부터)
+        end_page: 끝 페이지 (포함, None이면 끝까지)
+    
+    Returns:
+        텍스트와 이미지가 페이지 순서대로 포함된 리스트
+    """
+    doc = _load_pdf(path)
+    cache_dir = _get_cache_dir(path)
+    
+    # 페이지 범위 설정
+    total_pages = len(doc)
+    start = (start_page - 1) if start_page else 0
+    end = end_page if end_page else total_pages
+    
+    # 범위 검증
+    start = max(0, min(start, total_pages - 1))
+    end = max(start + 1, min(end, total_pages))
+    
+    range_text = f"페이지 {start + 1}~{end}" if (start_page or end_page) else f"전체 {total_pages}페이지"
+    result = [
+        TextContent(type="text", text=f"📄 PDF: {Path(path).name} ({range_text}) [스마트 모드]\n{'='*60}\n")
+    ]
+    
+    zoom = 150 / 72
+    matrix = fitz.Matrix(zoom, zoom)
+    
+    text_page_count = 0
+    image_page_count = 0
+    
+    for page_num in range(start, end):
+        page = doc[page_num]
+        
+        # 이미지/드로잉 존재 여부 확인
+        has_images = len(page.get_images()) > 0
+        has_drawings = len(page.get_drawings()) > 0
+        
+        if has_images or has_drawings:
+            # 이미지/드로잉이 있으면 페이지 전체를 이미지로 렌더링
+            image_page_count += 1
+            pixmap = page.get_pixmap(matrix=matrix)
+            filename = f"page_{page_num + 1:03d}.png"
+            image_path = cache_dir / filename
+            pixmap.save(str(image_path))
+            
+            with open(image_path, "rb") as f:
+                image_data = base64.standard_b64encode(f.read()).decode("utf-8")
+            
+            result.append(TextContent(type="text", text=f"\n📖 페이지 {page_num + 1} 🖼️\n"))
+            result.append(ImageContent(type="image", data=image_data, mimeType="image/png"))
+        else:
+            # 텍스트만 있으면 텍스트로 반환
+            text_page_count += 1
+            text = page.get_text().strip()
+            result.append(TextContent(
+                type="text", 
+                text=f"\n📖 페이지 {page_num + 1} 📝\n{'-'*40}\n{text if text else '(텍스트 없음)'}\n"
+            ))
+    
+    # 요약 정보 추가
+    result.append(TextContent(
+        type="text",
+        text=f"\n{'='*60}\n📊 처리 결과: 텍스트 {text_page_count}페이지, 이미지 {image_page_count}페이지"
+    ))
     
     doc.close()
     return result
