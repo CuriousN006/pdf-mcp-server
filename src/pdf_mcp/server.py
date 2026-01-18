@@ -68,77 +68,89 @@ def _save_image(pixmap: fitz.Pixmap, cache_dir: Path, filename: str) -> str:
     pixmap.save(str(image_path))
     return str(image_path.absolute())
 
-
-def _extract_page_elements(page: fitz.Page, cache_dir: Path, page_num: int) -> List[Tuple[float, str, str]]:
-    """
-    페이지에서 텍스트 블록과 이미지를 추출하고 Y좌표 기준으로 정렬합니다.
-    
-    Returns:
-        List of (y_position, element_type, content)
-        - element_type: "text" 또는 "image"
-        - content: 텍스트 내용 또는 이미지 파일 경로
-    """
-    elements = []
-    
-    # 1. 텍스트 블록 추출
-    # get_text("dict")는 페이지 내 모든 블록의 상세 정보를 반환
-    text_dict = page.get_text("dict")
-    
-    for block in text_dict.get("blocks", []):
-        bbox = block.get("bbox", (0, 0, 0, 0))  # (x0, y0, x1, y1)
-        y_pos = bbox[1]  # y0 좌표 (위에서부터의 거리)
-        
-        if block.get("type") == 0:  # 텍스트 블록
-            # 블록 내 모든 라인의 텍스트를 합침
-            text_lines = []
-            for line in block.get("lines", []):
-                line_text = ""
-                for span in line.get("spans", []):
-                    line_text += span.get("text", "")
-                if line_text.strip():
-                    text_lines.append(line_text)
-            
-            if text_lines:
-                text_content = "\n".join(text_lines)
-                elements.append((y_pos, "text", text_content))
-    
-    # 2. 이미지 추출 - 각 이미지의 실제 위치(bbox)를 사용
-    # get_images()로 이미지 목록을 가져오고, get_image_rects()로 위치 확인
-    for img_idx, img_info in enumerate(page.get_images(full=True)):
-        xref = img_info[0]
-        
-        try:
-            # 이미지의 실제 위치(bbox) 가져오기
-            img_rects = page.get_image_rects(xref)
-            if not img_rects:
-                continue  # 위치를 알 수 없으면 건너뜀
-            
-            # 첫 번째 rect의 y0 좌표 사용 (이미지가 여러 곳에 있을 수 있지만 첫 번째 사용)
-            y_pos = img_rects[0].y0
-            
-            # 이미지 데이터 추출
-            base_image = page.parent.extract_image(xref)
-            if base_image:
-                image_bytes = base_image["image"]
-                image_ext = base_image["ext"]
-                
-                # 이미지 저장
-                filename = f"img_p{page_num + 1}_{img_idx + 1:03d}.{image_ext}"
-                image_path = cache_dir / filename
-                
-                # 이미 캐시된 이미지가 있으면 재사용
-                if not image_path.exists():
-                    with open(image_path, "wb") as f:
-                        f.write(image_bytes)
-                
-                elements.append((y_pos, "image", str(image_path.absolute())))
-        except Exception:
-            pass  # 이미지 추출 실패 시 무시
-    
-    # Y좌표 기준 정렬 (위에서 아래로)
-    elements.sort(key=lambda x: x[0])
-    
-    return elements
+# ============================================================
+# [DEPRECATED] 미사용 코드 - 주석 처리 (2026-01-18)
+# ============================================================
+# 아래 함수는 텍스트와 이미지를 Y좌표 기준으로 정렬하여 원본 순서대로
+# interleave하려는 시도였으나, 다음 문제로 인해 폐기되었습니다:
+#   1. 벡터 그래픽(그래프, 도표)은 get_images()로 감지 불가
+#   2. 2단 레이아웃에서 Y좌표만으로는 왼쪽/오른쪽 열 구분 불가
+#   3. 복잡한 레이아웃(표, 캡션, 각주)에서 순서 결정 어려움
+# 
+# 대신 read_pdf_smart에서 페이지 전체를 이미지로 렌더링하는 방식을
+# 사용합니다. 향후 필요시 참고용으로 남겨둡니다.
+# ============================================================
+#
+# def _extract_page_elements(page: fitz.Page, cache_dir: Path, page_num: int) -> List[Tuple[float, str, str]]:
+#     """
+#     페이지에서 텍스트 블록과 이미지를 추출하고 Y좌표 기준으로 정렬합니다.
+#     
+#     Returns:
+#         List of (y_position, element_type, content)
+#         - element_type: "text" 또는 "image"
+#         - content: 텍스트 내용 또는 이미지 파일 경로
+#     """
+#     elements = []
+#     
+#     # 1. 텍스트 블록 추출
+#     # get_text("dict")는 페이지 내 모든 블록의 상세 정보를 반환
+#     text_dict = page.get_text("dict")
+#     
+#     for block in text_dict.get("blocks", []):
+#         bbox = block.get("bbox", (0, 0, 0, 0))  # (x0, y0, x1, y1)
+#         y_pos = bbox[1]  # y0 좌표 (위에서부터의 거리)
+#         
+#         if block.get("type") == 0:  # 텍스트 블록
+#             # 블록 내 모든 라인의 텍스트를 합침
+#             text_lines = []
+#             for line in block.get("lines", []):
+#                 line_text = ""
+#                 for span in line.get("spans", []):
+#                     line_text += span.get("text", "")
+#                 if line_text.strip():
+#                     text_lines.append(line_text)
+#             
+#             if text_lines:
+#                 text_content = "\n".join(text_lines)
+#                 elements.append((y_pos, "text", text_content))
+#     
+#     # 2. 이미지 추출 - 각 이미지의 실제 위치(bbox)를 사용
+#     # get_images()로 이미지 목록을 가져오고, get_image_rects()로 위치 확인
+#     for img_idx, img_info in enumerate(page.get_images(full=True)):
+#         xref = img_info[0]
+#         
+#         try:
+#             # 이미지의 실제 위치(bbox) 가져오기
+#             img_rects = page.get_image_rects(xref)
+#             if not img_rects:
+#                 continue  # 위치를 알 수 없으면 건너뜀
+#             
+#             # 첫 번째 rect의 y0 좌표 사용 (이미지가 여러 곳에 있을 수 있지만 첫 번째 사용)
+#             y_pos = img_rects[0].y0
+#             
+#             # 이미지 데이터 추출
+#             base_image = page.parent.extract_image(xref)
+#             if base_image:
+#                 image_bytes = base_image["image"]
+#                 image_ext = base_image["ext"]
+#                 
+#                 # 이미지 저장
+#                 filename = f"img_p{page_num + 1}_{img_idx + 1:03d}.{image_ext}"
+#                 image_path = cache_dir / filename
+#                 
+#                 # 이미 캐시된 이미지가 있으면 재사용
+#                 if not image_path.exists():
+#                     with open(image_path, "wb") as f:
+#                         f.write(image_bytes)
+#                 
+#                 elements.append((y_pos, "image", str(image_path.absolute())))
+#         except Exception:
+#             pass  # 이미지 추출 실패 시 무시
+#     
+#     # Y좌표 기준 정렬 (위에서 아래로)
+#     elements.sort(key=lambda x: x[0])
+#     
+#     return elements
 
 
 # ============================================================
