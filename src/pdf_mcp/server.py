@@ -18,10 +18,12 @@ MCP(Model Context Protocol)란?
 """
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import TextContent, ImageContent
 import fitz  # PyMuPDF
 from pathlib import Path
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Union
 import os
+import base64
 
 
 # ============================================================
@@ -237,13 +239,11 @@ def read_pdf_text(
     
     doc.close()
     return "\n".join(result)
-
-
 @mcp.tool()
 def read_pdf_page(
     path: str,
     page_number: int
-) -> str:
+) -> List[Union[TextContent, ImageContent]]:
     """
     PDF 페이지의 텍스트와 이미지를 **원본 순서대로** 추출합니다.
     
@@ -270,30 +270,28 @@ def read_pdf_page(
     page = doc[page_number - 1]
     cache_dir = _get_cache_dir(path)
     
-    # 페이지 요소 추출 (Y좌표 순서대로)
-    elements = _extract_page_elements(page, cache_dir, page_number - 1)
+    # 페이지 전체를 이미지로 렌더링 (150 DPI)
+    zoom = 150 / 72
+    matrix = fitz.Matrix(zoom, zoom)
+    pixmap = page.get_pixmap(matrix=matrix)
     
-    result = []
-    result.append(f"📖 페이지 {page_number} / {len(doc)}")
-    result.append("=" * 60)
-    result.append("")
+    # 이미지 저장
+    filename = f"page_{page_number:03d}.png"
+    image_path = cache_dir / filename
+    pixmap.save(str(image_path))
     
-    if not elements:
-        result.append("(이 페이지에는 내용이 없습니다)")
-    else:
-        for y_pos, elem_type, content in elements:
-            if elem_type == "text":
-                result.append(content)
-                result.append("")  # 텍스트 블록 사이 빈 줄
-            elif elem_type == "image":
-                result.append(f"[이미지: {content}]")
-                result.append("")
+    # 이미지를 base64로 인코딩
+    with open(image_path, "rb") as f:
+        image_data = base64.standard_b64encode(f.read()).decode("utf-8")
     
-    result.append("=" * 60)
-    result.append(f"💡 이미지를 보려면 view_file 도구로 위 경로를 열어주세요.")
+    # 결과 반환
+    result = [
+        TextContent(type="text", text=f"📖 페이지 {page_number} / {len(doc)}\n"),
+        ImageContent(type="image", data=image_data, mimeType="image/png")
+    ]
     
     doc.close()
-    return "\n".join(result)
+    return result
 
 
 @mcp.tool()
