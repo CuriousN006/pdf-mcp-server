@@ -1,0 +1,21 @@
+[project]
+name = "pdf-mcp-server"
+version = "0.1.0"
+description = "MCP server for reading PDF files with text and images in order"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "mcp[cli]>=1.0.0",
+    "pymupdf>=1.24.0",
+]
+
+[project.scripts]
+pdf-mcp = "pdf_mcp.server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# hatchling이 src 폴더 안의 패키지를 찾도록 설정
+[tool.hatch.build.targets.wheel]
+packages = ["src/pdf_mcp"]
