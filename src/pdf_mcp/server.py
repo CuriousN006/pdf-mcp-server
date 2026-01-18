@@ -295,6 +295,52 @@ def read_pdf_page(
 
 
 @mcp.tool()
+def read_pdf_all(
+    path: str
+) -> List[Union[TextContent, ImageContent]]:
+    """
+    PDF 전체를 한 번에 읽어서 모든 페이지를 이미지로 반환합니다.
+    
+    각 페이지를 이미지로 렌더링하여 순서대로 반환합니다.
+    페이지 수가 많은 PDF의 경우 토큰 비용이 클 수 있습니다.
+    
+    Args:
+        path: PDF 파일의 절대 경로
+    
+    Returns:
+        모든 페이지의 텍스트 헤더와 이미지를 순서대로 포함한 리스트
+    """
+    doc = _load_pdf(path)
+    cache_dir = _get_cache_dir(path)
+    
+    result = [
+        TextContent(type="text", text=f"📄 PDF: {Path(path).name} ({len(doc)}페이지)\n{'='*60}\n")
+    ]
+    
+    zoom = 150 / 72
+    matrix = fitz.Matrix(zoom, zoom)
+    
+    for page_num in range(len(doc)):
+        page = doc[page_num]
+        
+        # 페이지 렌더링
+        pixmap = page.get_pixmap(matrix=matrix)
+        filename = f"page_{page_num + 1:03d}.png"
+        image_path = cache_dir / filename
+        pixmap.save(str(image_path))
+        
+        # 이미지 base64 인코딩
+        with open(image_path, "rb") as f:
+            image_data = base64.standard_b64encode(f.read()).decode("utf-8")
+        
+        # 페이지 헤더와 이미지 추가
+        result.append(TextContent(type="text", text=f"\n📖 페이지 {page_num + 1}\n"))
+        result.append(ImageContent(type="image", data=image_data, mimeType="image/png"))
+    
+    doc.close()
+    return result
+
+@mcp.tool()
 def render_pdf_page(
     path: str,
     page_number: int,
