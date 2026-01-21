@@ -7,16 +7,29 @@ PDF 파일을 멀티모달 LLM이 읽을 수 있게 해주는 MCP 서버입니�
 - **페이지 이미지 변환**: PDF 페이지를 이미지로 렌더링하여 LLM에 직접 전달
 - **전체 PDF 한 번에 읽기**: `read_pdf_all`로 모든 페이지를 한 번에 처리
 - **스마트 읽기**: `read_pdf_smart`로 텍스트/이미지 페이지 자동 판단
+- **Marker 딥러닝 변환**: `read_pdf_marker`로 복잡한 레이아웃 자동 분석 (선택적)
 - **벡터 그래픽 감지**: 드로잉(그래프, 도표) 개수도 함께 표시
 - **레이아웃 완벽 지원**: 2단 레이아웃, 벡터 그래프, 표 등 모두 정확히 표현
-- **이미지 캐싱**: 렌더링된 이미지를 캐시하여 재사용
+- **스마트 캐싱**: PDF 수정 시 자동으로 캐시 갱신, 캐시 삭제 도구 제공
 
 ## 설치
+
+### 기본 설치
 
 ```powershell
 cd d:\PythonPractice\pdf-mcp-server
 pip install -e .
 ```
+
+### Marker 기능 포함 설치 (선택)
+
+딥러닝 기반 PDF 분석 기능(`read_pdf_marker`)을 사용하려면:
+
+```powershell
+pip install -e ".[marker]"
+```
+
+> ⚠️ Marker는 PyTorch와 여러 딥러닝 모델을 사용합니다. GPU(CUDA) 환경을 권장합니다.
 
 ## VS Code 설정
 
@@ -86,15 +99,40 @@ read_pdf_text(path="d:/path/to/file.pdf", start_page=1, end_page=5)
 render_pdf_page(path="d:/path/to/file.pdf", page_number=1, dpi=150)
 ```
 
+### `read_pdf_marker` (Marker 설치 필요)
+**딥러닝 기반 PDF 변환** - 복잡한 레이아웃 자동 분석
+
+- 2단 레이아웃, 표, 각주 등을 자동으로 올바른 순서로 추출
+- 벡터 그래픽(차트, 도표)도 이미지로 변환
+- 수식을 LaTeX로 변환
+
+```
+read_pdf_marker(path="d:/path/to/file.pdf")
+```
+
+> ⚠️ 첫 실행 시 모델 로딩에 시간이 걸립니다 (10-30초). GPU 권장.
+
+### `clear_pdf_cache`
+PDF 캐시 삭제
+
+```
+clear_pdf_cache(path="d:/path/to/file.pdf")              # 실제 삭제
+clear_pdf_cache(path="d:/path/to/file.pdf", dry_run=True)  # 미리보기만
+```
+
 ## 캐시 구조
 
 ```
 📁 example.pdf
 📁 example_pdf_cache/        ← 자동 생성
+   ├── .cache_meta.json      ← PDF 수정 감지용 메타데이터
    ├── page_001.png          ← 페이지 1 이미지
    ├── page_002.png          ← 페이지 2 이미지
    └── ...
 ```
+
+- PDF 파일이 수정되면 캐시가 자동으로 갱신됩니다
+- `clear_pdf_cache`로 수동 삭제 가능
 
 ## LLM 사용 가이드
 
@@ -116,5 +154,18 @@ read_pdf_page(path="d:/path/to/paper.pdf", page_number=3)
 
 - `read_pdf_smart`: 토큰 절약하면서 그래프/도표도 정확히 보기
 - `read_pdf_all`: 모든 페이지를 이미지로 보기 (레이아웃 완벽)
+- `read_pdf_marker`: 복잡한 레이아웃(2단, 표, 수식)을 정확히 분석 (Marker 필요)
 - 이미지로 변환되므로 `view_file` 호출 없이 바로 표시됩니다
+
+## 버전 히스토리
+
+### v0.2.0
+- `read_pdf_marker`: Marker 딥러닝 기반 PDF 변환 추가
+- `clear_pdf_cache`: 캐시 삭제 도구 추가
+- 캐시 자동 갱신: PDF 수정 시 캐시 무효화
+- 리소스 누수 방지 개선
+
+### v0.1.0
+- 최초 릴리스
+- `read_pdf_smart`, `read_pdf_all`, `read_pdf_page` 등 기본 기능
 
