@@ -1,5 +1,7 @@
 # PDF MCP Server
 
+**v0.2.0**
+
 PDF 파일을 멀티모달 LLM이 읽을 수 있게 해주는 MCP 서버입니다.
 
 ## 특징
