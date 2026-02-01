@@ -22,35 +22,21 @@ from mcp.types import TextContent, ImageContent
 import fitz  # PyMuPDF
 from pathlib import Path
 from typing import Optional, List, Union
+from contextlib import contextmanager
 import os
 import base64
 import shutil
 import json
-import re
-import io
 from datetime import datetime
 
 # ============================================================
-# [DEPRECATED] Marker 기능 비활성화 (2026-02-01)
+# 상수 정의
 # ============================================================
-# Marker는 딥러닝 기반이라 첫 모델 로딩에 10-30초 이상 소요됩니다.
-# 실용성이 떨어져 비활성화합니다. 필요시 주석 해제하세요.
-# ============================================================
-#
-# # Marker (PDF to Markdown) - lazy loading
-# _marker_converter = None
-#
-# def _get_marker_converter():
-#     """
-#     Marker 모델을 lazy loading으로 초기화합니다.
-#     첫 호출 시에만 모델을 로드하여 메모리를 절약합니다.
-#     """
-#     global _marker_converter
-#     if _marker_converter is None:
-#         from marker.converters.pdf import PdfConverter
-#         from marker.models import create_model_dict
-#         _marker_converter = PdfConverter(artifact_dict=create_model_dict())
-#     return _marker_converter
+
+DEFAULT_DPI = 150  # 페이지 렌더링 기본 해상도
+PDF_BASE_DPI = 72  # PDF 표준 기본 DPI
+MAX_PREVIEW_PAGES = 10  # read_pdf_info에서 미리보기할 최대 페이지 수
+MAX_CACHE_FILE_LIST = 20  # 캐시 미리보기에서 표시할 최대 파일 수
 
 
 # ============================================================
@@ -170,13 +156,22 @@ def _get_cache_dir(pdf_path: str) -> Path:
     return cache_dir
 
 
-def _load_pdf(path: str) -> fitz.Document:
+@contextmanager
+def _load_pdf(path: str):
     """
-    PDF 파일을 열어서 Document 객체로 반환합니다.
+    PDF 파일을 열어서 Document 객체를 반환하는 context manager입니다.
+
+    사용 예:
+        with _load_pdf(path) as doc:
+            # doc 사용
     """
     if not os.path.exists(path):
         raise FileNotFoundError(f"PDF 파일을 찾을 수 없습니다: {path}")
-    return fitz.open(path)
+    doc = fitz.open(path)
+    try:
+        yield doc
+    finally:
+        doc.close()
 
 
 def _save_image(pixmap: fitz.Pixmap, cache_dir: Path, filename: str) -> str:
@@ -187,94 +182,11 @@ def _save_image(pixmap: fitz.Pixmap, cache_dir: Path, filename: str) -> str:
     pixmap.save(str(image_path))
     return str(image_path.absolute())
 
-# ============================================================
-# [DEPRECATED] 미사용 코드 - 주석 처리 (2026-01-18)
-# ============================================================
-# 아래 함수는 텍스트와 이미지를 Y좌표 기준으로 정렬하여 원본 순서대로
-# interleave하려는 시도였으나, 다음 문제로 인해 폐기되었습니다:
-#   1. 벡터 그래픽(그래프, 도표)은 get_images()로 감지 불가
-#   2. 2단 레이아웃에서 Y좌표만으로는 왼쪽/오른쪽 열 구분 불가
-#   3. 복잡한 레이아웃(표, 캡션, 각주)에서 순서 결정 어려움
-# 
-# 대신 read_pdf_smart에서 페이지 전체를 이미지로 렌더링하는 방식을
-# 사용합니다. 향후 필요시 참고용으로 남겨둡니다.
-# ============================================================
-#
-# def _extract_page_elements(page: fitz.Page, cache_dir: Path, page_num: int) -> List[Tuple[float, str, str]]:
-#     """
-#     페이지에서 텍스트 블록과 이미지를 추출하고 Y좌표 기준으로 정렬합니다.
-#     
-#     Returns:
-#         List of (y_position, element_type, content)
-#         - element_type: "text" 또는 "image"
-#         - content: 텍스트 내용 또는 이미지 파일 경로
-#     """
-#     elements = []
-#     
-#     # 1. 텍스트 블록 추출
-#     # get_text("dict")는 페이지 내 모든 블록의 상세 정보를 반환
-#     text_dict = page.get_text("dict")
-#     
-#     for block in text_dict.get("blocks", []):
-#         bbox = block.get("bbox", (0, 0, 0, 0))  # (x0, y0, x1, y1)
-#         y_pos = bbox[1]  # y0 좌표 (위에서부터의 거리)
-#         
-#         if block.get("type") == 0:  # 텍스트 블록
-#             # 블록 내 모든 라인의 텍스트를 합침
-#             text_lines = []
-#             for line in block.get("lines", []):
-#                 line_text = ""
-#                 for span in line.get("spans", []):
-#                     line_text += span.get("text", "")
-#                 if line_text.strip():
-#                     text_lines.append(line_text)
-#             
-#             if text_lines:
-#                 text_content = "\n".join(text_lines)
-#                 elements.append((y_pos, "text", text_content))
-#     
-#     # 2. 이미지 추출 - 각 이미지의 실제 위치(bbox)를 사용
-#     # get_images()로 이미지 목록을 가져오고, get_image_rects()로 위치 확인
-#     for img_idx, img_info in enumerate(page.get_images(full=True)):
-#         xref = img_info[0]
-#         
-#         try:
-#             # 이미지의 실제 위치(bbox) 가져오기
-#             img_rects = page.get_image_rects(xref)
-#             if not img_rects:
-#                 continue  # 위치를 알 수 없으면 건너뜀
-#             
-#             # 첫 번째 rect의 y0 좌표 사용 (이미지가 여러 곳에 있을 수 있지만 첫 번째 사용)
-#             y_pos = img_rects[0].y0
-#             
-#             # 이미지 데이터 추출
-#             base_image = page.parent.extract_image(xref)
-#             if base_image:
-#                 image_bytes = base_image["image"]
-#                 image_ext = base_image["ext"]
-#                 
-#                 # 이미지 저장
-#                 filename = f"img_p{page_num + 1}_{img_idx + 1:03d}.{image_ext}"
-#                 image_path = cache_dir / filename
-#                 
-#                 # 이미 캐시된 이미지가 있으면 재사용
-#                 if not image_path.exists():
-#                     with open(image_path, "wb") as f:
-#                         f.write(image_bytes)
-#                 
-#                 elements.append((y_pos, "image", str(image_path.absolute())))
-#         except Exception:
-#             pass  # 이미지 추출 실패 시 무시
-#     
-#     # Y좌표 기준 정렬 (위에서 아래로)
-#     elements.sort(key=lambda x: x[0])
-#     
-#     return elements
-
 
 # ============================================================
 # MCP 도구들
 # ============================================================
+
 
 @mcp.tool()
 def read_pdf_info(path: str) -> str:
@@ -287,8 +199,7 @@ def read_pdf_info(path: str) -> str:
     Returns:
         PDF 기본 정보 (페이지 수, 제목, 저자 등)
     """
-    doc = _load_pdf(path)
-    try:
+    with _load_pdf(path) as doc:
         result = []
         result.append(f"📄 PDF: {Path(path).name}")
         result.append(f"   총 페이지 수: {len(doc)}")
@@ -312,19 +223,17 @@ def read_pdf_info(path: str) -> str:
         result.append("📋 페이지 요약:")
         result.append("-" * 40)
 
-        for page_num in range(min(len(doc), 10)):  # 최대 10페이지까지만 요약
+        for page_num in range(min(len(doc), MAX_PREVIEW_PAGES)):
             page = doc[page_num]
             text_preview = page.get_text()[:50].replace('\n', ' ')
             img_count = len(page.get_images())
             drawing_count = len(page.get_drawings())
             result.append(f"  [{page_num + 1}] 이미지: {img_count}개, 드로잉: {drawing_count}개 | {text_preview}...")
 
-        if len(doc) > 10:
-            result.append(f"  ... 외 {len(doc) - 10}페이지 더 있음")
+        if len(doc) > MAX_PREVIEW_PAGES:
+            result.append(f"  ... 외 {len(doc) - MAX_PREVIEW_PAGES}페이지 더 있음")
 
         return "\n".join(result)
-    finally:
-        doc.close()
 
 
 @mcp.tool()
@@ -344,8 +253,7 @@ def read_pdf_text(
     Returns:
         추출된 텍스트
     """
-    doc = _load_pdf(path)
-    try:
+    with _load_pdf(path) as doc:
         # 페이지 범위 설정
         total_pages = len(doc)
         start = (start_page - 1) if start_page else 0
@@ -371,8 +279,8 @@ def read_pdf_text(
             result.append("")
 
         return "\n".join(result)
-    finally:
-        doc.close()
+
+
 @mcp.tool()
 def read_pdf_page(
     path: str,
@@ -394,8 +302,7 @@ def read_pdf_page(
     Returns:
         텍스트와 이미지 경로가 순서대로 포함된 마크다운
     """
-    doc = _load_pdf(path)
-    try:
+    with _load_pdf(path) as doc:
         # 페이지 번호 검증
         if page_number < 1 or page_number > len(doc):
             raise ValueError(f"페이지 번호 {page_number}가 유효하지 않습니다. 유효 범위: 1 ~ {len(doc)}")
@@ -403,13 +310,13 @@ def read_pdf_page(
         page = doc[page_number - 1]
         cache_dir = _get_cache_dir(path)
 
-        # 페이지 전체를 이미지로 렌더링 (150 DPI)
+        # 페이지 전체를 이미지로 렌더링
         filename = f"page_{page_number:03d}.png"
         image_path = cache_dir / filename
 
         # 캐시가 없을 때만 렌더링
         if not image_path.exists():
-            zoom = 150 / 72
+            zoom = DEFAULT_DPI / PDF_BASE_DPI
             matrix = fitz.Matrix(zoom, zoom)
             pixmap = page.get_pixmap(matrix=matrix)
             pixmap.save(str(image_path))
@@ -423,8 +330,6 @@ def read_pdf_page(
             TextContent(type="text", text=f"📖 페이지 {page_number} / {len(doc)}\n"),
             ImageContent(type="image", data=image_data, mimeType="image/png")
         ]
-    finally:
-        doc.close()
 
 
 @mcp.tool()
@@ -447,8 +352,7 @@ def read_pdf_all(
     Returns:
         모든 페이지의 텍스트 헤더와 이미지를 순서대로 포함한 리스트
     """
-    doc = _load_pdf(path)
-    try:
+    with _load_pdf(path) as doc:
         cache_dir = _get_cache_dir(path)
 
         # 페이지 범위 설정
@@ -465,7 +369,7 @@ def read_pdf_all(
             TextContent(type="text", text=f"📄 PDF: {Path(path).name} ({range_text})\n{'='*60}\n")
         ]
 
-        zoom = 150 / 72
+        zoom = DEFAULT_DPI / PDF_BASE_DPI
         matrix = fitz.Matrix(zoom, zoom)
 
         for page_num in range(start, end):
@@ -488,8 +392,6 @@ def read_pdf_all(
             result.append(ImageContent(type="image", data=image_data, mimeType="image/png"))
 
         return result
-    finally:
-        doc.close()
 
 
 @mcp.tool()
@@ -512,8 +414,7 @@ def read_pdf_smart(
     Returns:
         텍스트와 이미지가 페이지 순서대로 포함된 리스트
     """
-    doc = _load_pdf(path)
-    try:
+    with _load_pdf(path) as doc:
         cache_dir = _get_cache_dir(path)
 
         # 페이지 범위 설정
@@ -530,7 +431,7 @@ def read_pdf_smart(
             TextContent(type="text", text=f"📄 PDF: {Path(path).name} ({range_text}) [스마트 모드]\n{'='*60}\n")
         ]
 
-        zoom = 150 / 72
+        zoom = DEFAULT_DPI / PDF_BASE_DPI
         matrix = fitz.Matrix(zoom, zoom)
 
         text_page_count = 0
@@ -574,14 +475,13 @@ def read_pdf_smart(
         ))
 
         return result
-    finally:
-        doc.close()
+
 
 @mcp.tool()
 def render_pdf_page(
     path: str,
     page_number: int,
-    dpi: int = 150
+    dpi: int = DEFAULT_DPI
 ) -> str:
     """
     PDF 페이지 전체를 이미지로 렌더링합니다.
@@ -597,8 +497,7 @@ def render_pdf_page(
     Returns:
         렌더링된 이미지 파일의 절대 경로
     """
-    doc = _load_pdf(path)
-    try:
+    with _load_pdf(path) as doc:
         # 페이지 번호 검증
         if page_number < 1 or page_number > len(doc):
             raise ValueError(f"페이지 번호 {page_number}가 유효하지 않습니다. 유효 범위: 1 ~ {len(doc)}")
@@ -612,7 +511,7 @@ def render_pdf_page(
 
         # 캐시가 없을 때만 렌더링
         if not image_path.exists():
-            zoom = dpi / 72  # 72 DPI가 기본
+            zoom = dpi / PDF_BASE_DPI
             matrix = fitz.Matrix(zoom, zoom)
             pixmap = page.get_pixmap(matrix=matrix)
             pixmap.save(str(image_path))
@@ -632,130 +531,6 @@ def render_pdf_page(
         result.append("💡 view_file 도구로 위 경로를 열어서 이미지를 확인하세요.")
 
         return "\n".join(result)
-    finally:
-        doc.close()
-
-
-# ============================================================
-# [DEPRECATED] Marker 관련 헬퍼 함수 비활성화 (2026-02-01)
-# ============================================================
-# Marker 기능이 비활성화되어 이 함수도 주석 처리합니다.
-# ============================================================
-#
-# def _parse_markdown_with_images(
-#     markdown_text: str,
-#     images: dict
-# ) -> List[tuple]:
-#     """
-#     마크다운 텍스트에서 이미지 참조를 찾아 텍스트와 이미지로 분리합니다.
-#
-#     Args:
-#         markdown_text: Marker가 생성한 마크다운 텍스트
-#         images: Marker가 추출한 이미지 딕셔너리 {파일명: PIL Image}
-#
-#     Returns:
-#         [("text", "텍스트 내용"), ("image", "파일명"), ...] 형태의 리스트
-#     """
-#     # 마크다운 이미지 패턴: ![alt text](filename)
-#     image_pattern = re.compile(r'!\[([^\]]*)\]\(([^)]+)\)')
-#
-#     segments = []
-#     last_end = 0
-#
-#     for match in image_pattern.finditer(markdown_text):
-#         # 이미지 앞의 텍스트
-#         text_before = markdown_text[last_end:match.start()]
-#         if text_before.strip():
-#             segments.append(("text", text_before))
-#
-#         # 이미지 파일명 추출
-#         image_filename = match.group(2)
-#         segments.append(("image", image_filename))
-#
-#         last_end = match.end()
-#
-#     # 마지막 이미지 뒤의 텍스트
-#     text_after = markdown_text[last_end:]
-#     if text_after.strip():
-#         segments.append(("text", text_after))
-#
-#     return segments
-
-
-# ============================================================
-# [DEPRECATED] read_pdf_marker 비활성화 (2026-02-01)
-# ============================================================
-# Marker는 딥러닝 모델 로딩에 10-30초 이상 소요되어 실용성이 떨어집니다.
-# 대신 read_pdf_smart나 read_pdf_all을 사용하세요.
-# 필요시 아래 주석을 해제하고, pyproject.toml에 marker 의존성을 추가하세요.
-# ============================================================
-#
-# @mcp.tool()
-# def read_pdf_marker(path: str) -> List[Union[TextContent, ImageContent]]:
-#     """
-#     Marker를 사용하여 PDF를 읽고, 텍스트와 이미지를 원본 순서대로 반환합니다.
-#
-#     딥러닝 기반으로 복잡한 레이아웃(2단, 표, 각주 등)을 자동 분석하고,
-#     텍스트와 이미지를 원본 PDF의 읽기 순서대로 추출합니다.
-#
-#     - 벡터 그래픽(차트, 도표)도 이미지로 변환하여 포함
-#     - 표, 수식(LaTeX), 코드 블록 등을 정확하게 추출
-#
-#     ⚠️ 첫 실행 시 모델 로딩에 시간이 걸릴 수 있습니다 (약 10-30초).
-#
-#     Args:
-#         path: PDF 파일의 절대 경로
-#
-#     Returns:
-#         텍스트와 이미지가 원본 순서대로 포함된 리스트
-#     """
-#     if not os.path.exists(path):
-#         raise FileNotFoundError(f"PDF 파일을 찾을 수 없습니다: {path}")
-#
-#     # Marker 변환 실행
-#     converter = _get_marker_converter()
-#     rendered = converter(path)
-#
-#     # 결과 추출
-#     from marker.output import text_from_rendered
-#     markdown_text, _, images = text_from_rendered(rendered)
-#
-#     # 마크다운을 텍스트/이미지 세그먼트로 분리
-#     segments = _parse_markdown_with_images(markdown_text, images)
-#
-#     # MCP Content 리스트 생성
-#     result = [
-#         TextContent(
-#             type="text",
-#             text=f"📄 PDF: {Path(path).name} [Marker 딥러닝 변환]\n{'='*60}\n"
-#         )
-#     ]
-#
-#     for segment_type, content in segments:
-#         if segment_type == "text":
-#             result.append(TextContent(type="text", text=content))
-#         elif segment_type == "image":
-#             # images 딕셔너리에서 PIL Image 가져오기
-#             pil_image = images.get(content)
-#             if pil_image:
-#                 # PIL Image를 base64로 인코딩
-#                 buffer = io.BytesIO()
-#                 # PNG 형식으로 저장 (JPEG보다 품질이 좋음)
-#                 pil_image.save(buffer, format="PNG")
-#                 image_data = base64.standard_b64encode(buffer.getvalue()).decode("utf-8")
-#                 result.append(ImageContent(type="image", data=image_data, mimeType="image/png"))
-#             else:
-#                 # 이미지를 찾을 수 없으면 텍스트로 대체
-#                 result.append(TextContent(type="text", text=f"\n[이미지: {content}]\n"))
-#
-#     # 요약 정보
-#     image_count = sum(1 for s in segments if s[0] == "image")
-#     result.append(TextContent(
-#         type="text",
-#         text=f"\n{'='*60}\n📊 추출 결과: 이미지 {image_count}개 포함"
-#     ))
-#
-#     return result
 
 
 @mcp.tool()
@@ -800,12 +575,12 @@ def clear_pdf_cache(path: str, dry_run: bool = False) -> str:
         result.append(f"   💾 총 크기: {size_mb:.2f} MB")
         result.append("")
         result.append("   파일 목록:")
-        for f in sorted(files)[:20]:  # 최대 20개만 표시
+        for f in sorted(files)[:MAX_CACHE_FILE_LIST]:
             if f.is_file():
                 f_size = f.stat().st_size / 1024
                 result.append(f"   - {f.name} ({f_size:.1f} KB)")
-        if file_count > 20:
-            result.append(f"   ... 외 {file_count - 20}개 파일")
+        if file_count > MAX_CACHE_FILE_LIST:
+            result.append(f"   ... 외 {file_count - MAX_CACHE_FILE_LIST}개 파일")
         result.append("")
         result.append("ℹ️ 실제 삭제를 원하면 dry_run=False로 호출하세요.")
     else:
