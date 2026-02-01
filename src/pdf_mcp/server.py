@@ -30,20 +30,27 @@ import re
 import io
 from datetime import datetime
 
-# Marker (PDF to Markdown) - lazy loading
-_marker_converter = None
-
-def _get_marker_converter():
-    """
-    Marker 모델을 lazy loading으로 초기화합니다.
-    첫 호출 시에만 모델을 로드하여 메모리를 절약합니다.
-    """
-    global _marker_converter
-    if _marker_converter is None:
-        from marker.converters.pdf import PdfConverter
-        from marker.models import create_model_dict
-        _marker_converter = PdfConverter(artifact_dict=create_model_dict())
-    return _marker_converter
+# ============================================================
+# [DEPRECATED] Marker 기능 비활성화 (2026-02-01)
+# ============================================================
+# Marker는 딥러닝 기반이라 첫 모델 로딩에 10-30초 이상 소요됩니다.
+# 실용성이 떨어져 비활성화합니다. 필요시 주석 해제하세요.
+# ============================================================
+#
+# # Marker (PDF to Markdown) - lazy loading
+# _marker_converter = None
+#
+# def _get_marker_converter():
+#     """
+#     Marker 모델을 lazy loading으로 초기화합니다.
+#     첫 호출 시에만 모델을 로드하여 메모리를 절약합니다.
+#     """
+#     global _marker_converter
+#     if _marker_converter is None:
+#         from marker.converters.pdf import PdfConverter
+#         from marker.models import create_model_dict
+#         _marker_converter = PdfConverter(artifact_dict=create_model_dict())
+#     return _marker_converter
 
 
 # ============================================================
@@ -629,112 +636,126 @@ def render_pdf_page(
         doc.close()
 
 
-def _parse_markdown_with_images(
-    markdown_text: str,
-    images: dict
-) -> List[tuple]:
-    """
-    마크다운 텍스트에서 이미지 참조를 찾아 텍스트와 이미지로 분리합니다.
+# ============================================================
+# [DEPRECATED] Marker 관련 헬퍼 함수 비활성화 (2026-02-01)
+# ============================================================
+# Marker 기능이 비활성화되어 이 함수도 주석 처리합니다.
+# ============================================================
+#
+# def _parse_markdown_with_images(
+#     markdown_text: str,
+#     images: dict
+# ) -> List[tuple]:
+#     """
+#     마크다운 텍스트에서 이미지 참조를 찾아 텍스트와 이미지로 분리합니다.
+#
+#     Args:
+#         markdown_text: Marker가 생성한 마크다운 텍스트
+#         images: Marker가 추출한 이미지 딕셔너리 {파일명: PIL Image}
+#
+#     Returns:
+#         [("text", "텍스트 내용"), ("image", "파일명"), ...] 형태의 리스트
+#     """
+#     # 마크다운 이미지 패턴: ![alt text](filename)
+#     image_pattern = re.compile(r'!\[([^\]]*)\]\(([^)]+)\)')
+#
+#     segments = []
+#     last_end = 0
+#
+#     for match in image_pattern.finditer(markdown_text):
+#         # 이미지 앞의 텍스트
+#         text_before = markdown_text[last_end:match.start()]
+#         if text_before.strip():
+#             segments.append(("text", text_before))
+#
+#         # 이미지 파일명 추출
+#         image_filename = match.group(2)
+#         segments.append(("image", image_filename))
+#
+#         last_end = match.end()
+#
+#     # 마지막 이미지 뒤의 텍스트
+#     text_after = markdown_text[last_end:]
+#     if text_after.strip():
+#         segments.append(("text", text_after))
+#
+#     return segments
 
-    Args:
-        markdown_text: Marker가 생성한 마크다운 텍스트
-        images: Marker가 추출한 이미지 딕셔너리 {파일명: PIL Image}
 
-    Returns:
-        [("text", "텍스트 내용"), ("image", "파일명"), ...] 형태의 리스트
-    """
-    # 마크다운 이미지 패턴: ![alt text](filename)
-    image_pattern = re.compile(r'!\[([^\]]*)\]\(([^)]+)\)')
-
-    segments = []
-    last_end = 0
-
-    for match in image_pattern.finditer(markdown_text):
-        # 이미지 앞의 텍스트
-        text_before = markdown_text[last_end:match.start()]
-        if text_before.strip():
-            segments.append(("text", text_before))
-
-        # 이미지 파일명 추출
-        image_filename = match.group(2)
-        segments.append(("image", image_filename))
-
-        last_end = match.end()
-
-    # 마지막 이미지 뒤의 텍스트
-    text_after = markdown_text[last_end:]
-    if text_after.strip():
-        segments.append(("text", text_after))
-
-    return segments
-
-
-@mcp.tool()
-def read_pdf_marker(path: str) -> List[Union[TextContent, ImageContent]]:
-    """
-    Marker를 사용하여 PDF를 읽고, 텍스트와 이미지를 원본 순서대로 반환합니다.
-
-    딥러닝 기반으로 복잡한 레이아웃(2단, 표, 각주 등)을 자동 분석하고,
-    텍스트와 이미지를 원본 PDF의 읽기 순서대로 추출합니다.
-
-    - 벡터 그래픽(차트, 도표)도 이미지로 변환하여 포함
-    - 표, 수식(LaTeX), 코드 블록 등을 정확하게 추출
-
-    ⚠️ 첫 실행 시 모델 로딩에 시간이 걸릴 수 있습니다 (약 10-30초).
-
-    Args:
-        path: PDF 파일의 절대 경로
-
-    Returns:
-        텍스트와 이미지가 원본 순서대로 포함된 리스트
-    """
-    if not os.path.exists(path):
-        raise FileNotFoundError(f"PDF 파일을 찾을 수 없습니다: {path}")
-
-    # Marker 변환 실행
-    converter = _get_marker_converter()
-    rendered = converter(path)
-
-    # 결과 추출
-    from marker.output import text_from_rendered
-    markdown_text, _, images = text_from_rendered(rendered)
-
-    # 마크다운을 텍스트/이미지 세그먼트로 분리
-    segments = _parse_markdown_with_images(markdown_text, images)
-
-    # MCP Content 리스트 생성
-    result = [
-        TextContent(
-            type="text",
-            text=f"📄 PDF: {Path(path).name} [Marker 딥러닝 변환]\n{'='*60}\n"
-        )
-    ]
-
-    for segment_type, content in segments:
-        if segment_type == "text":
-            result.append(TextContent(type="text", text=content))
-        elif segment_type == "image":
-            # images 딕셔너리에서 PIL Image 가져오기
-            pil_image = images.get(content)
-            if pil_image:
-                # PIL Image를 base64로 인코딩
-                buffer = io.BytesIO()
-                # PNG 형식으로 저장 (JPEG보다 품질이 좋음)
-                pil_image.save(buffer, format="PNG")
-                image_data = base64.standard_b64encode(buffer.getvalue()).decode("utf-8")
-                result.append(ImageContent(type="image", data=image_data, mimeType="image/png"))
-            else:
-                # 이미지를 찾을 수 없으면 텍스트로 대체
-                result.append(TextContent(type="text", text=f"\n[이미지: {content}]\n"))
-
-    # 요약 정보
-    image_count = sum(1 for s in segments if s[0] == "image")
-    result.append(TextContent(
-        type="text",
-        text=f"\n{'='*60}\n📊 추출 결과: 이미지 {image_count}개 포함"
-    ))
-
-    return result
+# ============================================================
+# [DEPRECATED] read_pdf_marker 비활성화 (2026-02-01)
+# ============================================================
+# Marker는 딥러닝 모델 로딩에 10-30초 이상 소요되어 실용성이 떨어집니다.
+# 대신 read_pdf_smart나 read_pdf_all을 사용하세요.
+# 필요시 아래 주석을 해제하고, pyproject.toml에 marker 의존성을 추가하세요.
+# ============================================================
+#
+# @mcp.tool()
+# def read_pdf_marker(path: str) -> List[Union[TextContent, ImageContent]]:
+#     """
+#     Marker를 사용하여 PDF를 읽고, 텍스트와 이미지를 원본 순서대로 반환합니다.
+#
+#     딥러닝 기반으로 복잡한 레이아웃(2단, 표, 각주 등)을 자동 분석하고,
+#     텍스트와 이미지를 원본 PDF의 읽기 순서대로 추출합니다.
+#
+#     - 벡터 그래픽(차트, 도표)도 이미지로 변환하여 포함
+#     - 표, 수식(LaTeX), 코드 블록 등을 정확하게 추출
+#
+#     ⚠️ 첫 실행 시 모델 로딩에 시간이 걸릴 수 있습니다 (약 10-30초).
+#
+#     Args:
+#         path: PDF 파일의 절대 경로
+#
+#     Returns:
+#         텍스트와 이미지가 원본 순서대로 포함된 리스트
+#     """
+#     if not os.path.exists(path):
+#         raise FileNotFoundError(f"PDF 파일을 찾을 수 없습니다: {path}")
+#
+#     # Marker 변환 실행
+#     converter = _get_marker_converter()
+#     rendered = converter(path)
+#
+#     # 결과 추출
+#     from marker.output import text_from_rendered
+#     markdown_text, _, images = text_from_rendered(rendered)
+#
+#     # 마크다운을 텍스트/이미지 세그먼트로 분리
+#     segments = _parse_markdown_with_images(markdown_text, images)
+#
+#     # MCP Content 리스트 생성
+#     result = [
+#         TextContent(
+#             type="text",
+#             text=f"📄 PDF: {Path(path).name} [Marker 딥러닝 변환]\n{'='*60}\n"
+#         )
+#     ]
+#
+#     for segment_type, content in segments:
+#         if segment_type == "text":
+#             result.append(TextContent(type="text", text=content))
+#         elif segment_type == "image":
+#             # images 딕셔너리에서 PIL Image 가져오기
+#             pil_image = images.get(content)
+#             if pil_image:
+#                 # PIL Image를 base64로 인코딩
+#                 buffer = io.BytesIO()
+#                 # PNG 형식으로 저장 (JPEG보다 품질이 좋음)
+#                 pil_image.save(buffer, format="PNG")
+#                 image_data = base64.standard_b64encode(buffer.getvalue()).decode("utf-8")
+#                 result.append(ImageContent(type="image", data=image_data, mimeType="image/png"))
+#             else:
+#                 # 이미지를 찾을 수 없으면 텍스트로 대체
+#                 result.append(TextContent(type="text", text=f"\n[이미지: {content}]\n"))
+#
+#     # 요약 정보
+#     image_count = sum(1 for s in segments if s[0] == "image")
+#     result.append(TextContent(
+#         type="text",
+#         text=f"\n{'='*60}\n📊 추출 결과: 이미지 {image_count}개 포함"
+#     ))
+#
+#     return result
 
 
 @mcp.tool()

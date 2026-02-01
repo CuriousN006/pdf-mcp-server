@@ -1,6 +1,6 @@
 [project]
 name = "pdf-mcp-server"
-version = "0.2.0"
+version = "0.2.1"
 description = "MCP server for reading PDF files with text and images in order"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -9,8 +9,10 @@ dependencies = [
     "pymupdf>=1.24.0",
 ]
 
-[project.optional-dependencies]
-marker = ["marker-pdf>=0.2.0"]
+# [DEPRECATED] Marker 기능 비활성화 (2026-02-01)
+# 딥러닝 모델 로딩이 너무 오래 걸려서 비활성화함
+# [project.optional-dependencies]
+# marker = ["marker-pdf>=0.2.0"]
 
 [project.scripts]
 pdf-mcp = "pdf_mcp.server:main"
