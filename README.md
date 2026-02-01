@@ -143,7 +143,7 @@ read_pdf_page(path="d:/path/to/paper.pdf", page_number=3)
 ## 버전 히스토리
 
 ### v0.2.1
-- `read_pdf_marker` 비활성화: 딥러닝 모델 로딩이 10-30초 이상 소요되어 실용성 부족
+- `read_pdf_marker` 비활성화: 딥러닝 모델 로딩이 지나치게 시간이 소요되어 실용성 부족
 - marker-pdf 의존성 제거로 설치 크기 감소
 
 ### v0.2.0
